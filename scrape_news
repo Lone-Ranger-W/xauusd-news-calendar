@@ -1,0 +1,66 @@
+# .github/workflows/scrape_news.yml
+#
+# Runs the ForexFactory news scraper every Sunday at 20:00 UTC and commits
+# the updated JSON to the `data` branch so the XAUUSD cBot can fetch it.
+#
+# Manual trigger:  Actions → "Scrape XAUUSD News Calendar" → Run workflow
+
+name: Scrape XAUUSD News Calendar
+
+on:
+  schedule:
+    # Every Sunday at 20:00 UTC (after weekend market close, before Monday open)
+    - cron: "0 20 * * 0"
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write      # needed to commit back to the data branch
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # 1. Check out the data branch (creates it if it doesn't exist)
+      - name: Checkout data branch
+        uses: actions/checkout@v4
+        with:
+          ref: data
+          fetch-depth: 1
+
+      # 2. Set up Python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: pip install requests
+
+      # 4. Run the scraper (script lives on main, output goes to data branch)
+      - name: Fetch scraper script from main and run
+        run: |
+          # Pull the script from the main branch without switching branches
+          git fetch origin main
+          git checkout origin/main -- scrape_news.py
+          python scrape_news.py
+
+      # 5. Commit and push the updated JSON if anything changed
+      - name: Commit updated news_events.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/news_events.json
+          # Only commit if the file actually changed
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            git commit -m "chore: update news_events.json [${TIMESTAMP}]"
+            git push origin data
+            echo "Committed and pushed."
+          fi
